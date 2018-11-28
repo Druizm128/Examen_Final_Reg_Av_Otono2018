@@ -4,15 +4,13 @@ model
 #Space equation.
 for (i in 1:n) {
 	y[i] ~ dnorm(mu[i],tau.y)
-	mu[i]<-alpha[i]+beta[1,i]*x[i,1]+beta[2,i]*x[i,2]+beta[3,i]*x[i,3]+beta[4,i]*x[i,4]+beta[5,i]*x[i,5]+beta[6,i]*x[i,6]
+	mu[i]<-beta[1,i]*x[i,1]+beta[2,i]*x[i,2]+beta[3,i]*x[i,3]+beta[4,i]*x[i,4]+beta[5,i]*x[i,5]+beta[6,i]*x[i,6]
 	}
 
 #State equation
 
 for (i in 2:n) {
-	
-	alpha[i]~dnorm(alpha[i-1],tau.a)
-	
+
 	for(j in 1:6){
 
 	beta[j,i] ~ dnorm(beta[j,i-1],tau.b[j])
@@ -22,17 +20,17 @@ for (i in 2:n) {
 
 
 #Priors 
-alpha[1]~dnorm(0,0.001)
+tau.y ~ dgamma(0.1,0.1)
 
 for(j in 1:6){
-
 	beta[j,1] ~ dnorm(0,0.001)
-	tau.b[j] ~ dgamma(0.1,0.1)
 }
 
-tau.y ~ dgamma(0.1,0.1)
-tau.a ~ dgamma(0.1,0.1)
+lambda<-1000
 
+for (j in 1:6){
+  tau.b[j] <- lambda*tau.y
+}
 
 #Prediction 
 for (i in 1:n) { 

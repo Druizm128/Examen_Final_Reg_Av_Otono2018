@@ -1,5 +1,5 @@
 # Regresion Avanzada: Examen Final
-# Modelo Dinamico
+# Modelo Dinamico sin Intercepto
 
 #- Specifying hyperparameters
 niter<-20000
@@ -11,15 +11,15 @@ semilla<-3567
 data_dinam <- list("n"=n,"m"=m,"y"=c(datos$WTI[1:(n-3)],rep(NA,m)), "x"=select(datos, -WTI))
 
 #-Defining inits-
-inits<-function(){list(alpha=rep(0,n),beta=matrix(0,k,n),tau.y=1,tau.a=1,tau.b=rep(1,k),yp=rep(1,n))}
+inits<-function(){list(beta=matrix(0,k,n),tau.y=1,tau.a=1,tau.b=rep(1,k),yp=rep(1,n))}
 
 #-Selecting parameters to monitor-
-parameters<-c("alpha","beta","tau.y","tau.a","tau.b","yp")
+parameters<-c("beta","tau.y","tau.a","tau.b","yp")
 
 
 #-Running code in JAGS-
 set.seed(semilla)
-mod_dinam.sim<-jags(data_dinam,inits,parameters,model.file="mod_dinamico1.txt",
+mod_dinam.sim<-jags(data_dinam,inits,parameters,model.file="mod2_dinamico1.txt",
                     n.iter=niter,n.chains=nchains,n.burnin=nburning,n.thin=1,
                     progress.bar='none')
 
@@ -42,17 +42,9 @@ out_dinam<-mod_dinam.sim$BUGSoutput$sims.list
 out_dinam.sum<-mod_dinam.sim$BUGSoutput$summary
 
 # Modes
-modas_dinam_alpha<-apply(out_dinam$alpha,2,getmode)
 modas_dinam_beta<-unlist(lapply(1:n,function(x){apply(out_dinam$beta[,,x],2,getmode)}))
 
 # Summary
-out_dinam.sum.t_alpha<-cbind(out_dinam.sum[grep("alpha",rownames(out_dinam.sum)),c(1,3,5,7)],modas_dinam_alpha)
-out_dinam.sum.t_alpha<-cbind(out_dinam.sum.t_alpha,apply(out_dinam$alpha,2,prob))
-out_dinam.sum.t_alpha<-out_dinam.sum.t_alpha[,c(1,3,5,2,4,6)]
-colnames(out_dinam.sum.t_alpha)<-c("Media","Mediana","Moda","2.5%","97.5%","Prob.")
-rownames(out_dinam.sum.t_alpha)<-paste('Intercepto t=',1:n,sep='_')
-
-
 out_dinam.sum.t_beta<-cbind(out_dinam.sum[grep("beta",rownames(out_dinam.sum)),c(1,3,5,7)],modas_dinam_beta)
 out_dinam.sum.t_beta<-cbind(out_dinam.sum.t_beta,apply(out_dinam$beta,2,prob))
 out_dinam.sum.t_beta<-out_dinam.sum.t_beta[,c(1,3,5,2,4,6)]
@@ -64,9 +56,6 @@ out_dinam.dic<-mod_dinam.sim$BUGSoutput$DIC
 
 #-Predictions-
 out_dinam.yp<-out_dinam.sum[grep("yp",rownames(out_dinam.sum)),]
-
-#-alpha-
-out_dinam.alpha<-out_dinam.sum[grep("alpha",rownames(out_dinam.sum)),]
 
 #-Betas-
 out_dinam.beta<-out_dinam.sum[grep("beta",rownames(out_dinam.sum)),]

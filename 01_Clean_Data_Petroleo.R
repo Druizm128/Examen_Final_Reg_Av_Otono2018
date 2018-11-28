@@ -23,8 +23,13 @@ datos_2<-datos_limpios%>%
 # Datos con variable dependiente y variables independientes transformadas
 datos_3<-datos_limpios%>%
   mutate(WTI=log(WTI),
-         OPEP_TOTPROD=log(OPEP_TOTPROD),
-         OPEP_TOTDEM=log(OPEP_TOTDEM))
+         JPM_Dollar_Index = log(JPM_Dollar_Index),
+         VIX_Index = log(VIX_Index),
+         OPEP_TOTPROD = log(OPEP_TOTPROD),
+         OPEP_TOTDEM = log(OPEP_TOTDEM),
+         TBILL_10YR = log(TBILL_10YR),
+         TBILL_1YR = log(TBILL_1YR))
+
 
 
 # Estandarizamos los datos
@@ -49,12 +54,14 @@ datos_3_estand<-datos_3%>%
   mutate(Fecha=datos_limpios$Fecha)%>%
   select(Fecha,everything())
 
+
+
 # Guardaos los datos sin estandarizar
-write.csv(datos_1,'datos_1.csv',row.names=FALSE)
-write.csv(datos_2,'datos_2.csv',row.names=FALSE)
-write.csv(datos_3,'datos_3.csv',row.names=FALSE)
+write.csv(datos_1,'datos/datos_1.csv',row.names=FALSE)
+write.csv(datos_2,'datos/datos_2.csv',row.names=FALSE)
+write.csv(datos_3,'datos/datos_3.csv',row.names=FALSE)
 
 # Guardamos los datos estandarizados
-write.csv(datos_1_estand,'datos_1_estand.csv',row.names = FALSE)
-write.csv(datos_2_estand,'datos_2_estand.csv',row.names = FALSE)
-write.csv(datos_3_estand,'datos_3_estand.csv',row.names = FALSE)
+write.csv(datos_1_estand,'datos/datos_1_estand.csv',row.names = FALSE)
+write.csv(datos_2_estand,'datos/datos_2_estand.csv',row.names = FALSE)
+write.csv(datos_3_estand,'datos/datos_3_estand.csv',row.names = FALSE)

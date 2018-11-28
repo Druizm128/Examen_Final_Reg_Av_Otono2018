@@ -1,0 +1,1331 @@
+---
+title: "Regresión Avanzada Proyecto Final"
+author: "Alejandra Lelo de Larrea Ibarra 00012433 \\ Laura López Santibañez Jácome 000144088 \\ Dante Ruiz Martínez 000183340"
+date: "10 de diciembre del 2018"
+header-includes:
+  - \usepackage[utf8]{inputenc}
+  - \usepackage[spanish,mexico]{babel}
+  - \usepackage{arydshln}
+abstract: "Agregar un resumen al final."
+output: 
+  pdf_document:
+    fig_caption: yes
+    number_sections: true
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r setWD}
+# Ruta ALE
+#setwd("~/Documents/ITAM_Maestria/03_Otono_2018/01_Regresion_Avanzda/05_Proyecto_Final")
+# Ruta Banxico
+# setwd("//client/E$/ITAM_Maestria/03_Otono_2018/01_Regresion_Avanzada/05_Proyecto_Final")
+# Ruta Laura
+# Ruta Dante
+```
+
+```{r librerias,message=FALSE, warning=FALSE}
+# Cargamos librerias
+library(R2jags)
+library(tidyverse)
+library(gridExtra)
+library(xtable) # para edición de tablas
+library(pastecs)#para analisis descriptivo de datos
+```
+
+```{r funciones_aux}
+# Gráfica de series de tiempo
+plot_ts<-function(datos,Fechas){
+  
+  output<-function(var,color,var.name,unidades){
+    
+    par(mar=c(5.1,2.1,3.1,2.1))
+
+    nobs<-nrow(datos)
+  
+    col<-match(var,colnames(datos))
+    y<-unlist(datos[,col])
+  
+    xmin<-1
+    xmax<-nobs
+    ymin<-min(y,na.rm=TRUE)
+    ymax<-max(y,na.rm=TRUE)
+  
+    plot(1:nobs,y,type="l",lwd=2,lty=1,col=color,
+         xaxt='n',ylim=c(ymin,ymax),xlim=c(xmin,xmax),
+         xlab='',ylab=var.name,
+         main=var.name)
+    
+    mtext(paste("(",unidades,")",sep=''), side=3,line=0,cex=0.8)
+
+    axis(1,at=seq(1,nobs,6),labels=Fechas[seq(1,nobs,6)],las=2)
+    
+    abline(h=seq(ymin,ymax,ceiling((ymax-ymin)/10)),lty=2,lwd=1,col='gray50')
+  }
+  
+  output
+}
+
+
+# Probabilidad
+prob<-function(x){
+  out<-min(length(x[x>0])/length(x),length(x[x<0])/length(x))
+  out
+}
+
+getmode <- function(v) {
+   uniqv <- unique(v)
+   uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+# Grafica de regresores vs WTI
+plot_RegvsWTI<-function(x.name,out.yp,pos_leg){
+  
+  col_reg<-match(x.name,colnames(datos))
+  x<-unlist(datos[,col_reg])
+  y<-datos$WTI
+
+  x.name<-case_when(x.name=='JPM_Dollar_Index.name'~'JPM Dollar Index.name',
+                    x.name=='VIx.name_Index.name'~'VIx.name Index.name',
+                    x.name=='OPEP_TOTPROD'~'Prod. OPEP',
+                    x.name=='OPEP_TOTDEM'~'Dem. OPEP',
+                    x.name=='TBILL_10YR'~'TBILL-10YR',
+                    x.name=='TBILL_1YR'~'TBILL-1YR')
+  
+  ymin<-min(y,out.yp[,c(1,3,7)])
+  ymax<-max(y,out.yp[,c(1,3,7)])
+  xmin<-min(x)
+  xmax<-max(x)
+  
+  plot(x,y,type="p",pch=16,col="grey50",ylim=c(ymin,ymax),
+     main=paste(x.name," vs WTI"),xlab=x.name,ylab='WTI')
+  
+  points(x,out.yp[,1],col='firebrick1',pch=16,cex=0.8)
+  
+  segments(x,out.yp[,3],x,out.yp[,7],col=2)
+
+  legend(pos_leg,legend=c('Observado','Ajustado'),pch=16,col=c('grey50','firebrick1'))
+}
+
+# Gráfica de ajuste y pronóstico WTI
+plot_tsWTI<-function(out.yp,pos_leg){
+  
+  xmin<-1
+  xmax<-n
+  ymin<-min(c(datos$WTI,out.yp[,1]))
+  ymax<-max(c(datos$WTI,out.yp[,1]))
+  
+  plot(1:n,datos$WTI,type="l",lwd=2,col="grey80",xaxt='n',ylim=c(ymin,ymax),xlim=c(xmin,xmax),xlab='',ylab='WTI')
+  lines(1:n,c(out.yp[1:(n-m)],rep(NA,m)),lty=2,col='firebrick1')
+  lines(1:n,c(rep(NA,n-m),out.yp[(n-m+1):n,1]),lty=1,lwd=2,col='royalblue1')
+  axis(1,at=seq(1,n,6),labels=Fecha[seq(1,n,6)],las=2)
+  legend(pos_leg,legend=c('Observado','Ajustado','Pronosticado'),lty=c(1,2,1),lwd=c(2,1,2),col=c('grey50','firebrick1','royalblue1'))
+}
+
+
+# Gráfica de serire de tiempo de coeficients
+plot_beta<-function(out.beta){
+  
+  plotfun<-function (x){
+  
+    name.y<-case_when(x==1~'JPM Dollar Index',
+                      x==2~'VIX Index',
+                      x==3~'Prod. OPEP',
+                      x==4~'Dem. OPEP',
+                      x==5~'TBILL-10YR',
+                      x==6~'TBILL-1YR')
+                      
+                   
+    ymin<-min(out.beta[seq(x,nrow(out.beta),k),c(1,3,7)])
+    ymax<-max(out.beta[seq(x,nrow(out.beta),k),c(1,3,7)])
+    xmin<-1
+    xmax<-n
+    
+    plot(out.beta[seq(x,nrow(out.beta),k),1],
+         type="l",lty=1,lwd=2,col='firebrick1',
+         ylim=c(ymin,ymax),xlim=c(xmin,xmax),xaxt='n',
+         xlab='',ylab=name.y,
+         main=paste('Serie de tiempo del coeficiente estimado para ', name.y,sep=""))
+    
+    lines(out.beta[seq(x,nrow(out.beta),k),3],lty=2,lwd=2,col='gray50')
+    
+    lines(out.beta[seq(x,nrow(out.beta),k),7],lty=2,lwd=2,col='gray50')
+    
+    axis(1,at=seq(1,n,6),labels=Fecha[seq(1,n,6)],las=2)
+    
+    legend('topright',legend=c('Media','Banda Conf. 95%'),lty=c(1,2),lwd=2,col=c('firebrick1','gray50'))
+  
+         }  
+  plotfun
+}
+```
+
+\newpage
+# Introducción
+
+## Problema
+
+## Objetivo
+
+## Hipótesis
+
+\newpage
+
+# Datos
+
+## Descripción de los datos
+
+\begin{table}[h]
+  \small
+  \caption{Resumen de los Datos}
+  \label{tabla:Datos}
+  \begin{tabular}{l|p{5cm}|p{3cm}|l|l}
+    \hline
+    Código & Variable &  Unidades & Fuente & Ticker \\
+    \hline
+    WTI & West Texas Intermediate &  Dólares por barril & Bloomberg & CL1 Comdty \\
+    \hdashline
+    JPM Dollar Index & JPM Dollar Index &	Unidades & Bloomberg & FXJPEMCI Index \\
+    \hdashline
+    VIX & Chicago Board Options Exchange SPX Volatility Index & Unidades & Bloomberg & VIX Index \\
+    \hdashline
+    Prod. OPEP & Producción Total de Petróleo de la OPEP & Millones de barriles por día & Bloomberg & OPCRTOTL Index \\
+    \hdashline
+    Dem. OPEP & Demanda Total de Petróleo de la OPEP & Millones de barriles por dia & Bloomberg & OPCBRTOT Index\\
+    \hline
+    TBILL-10YR & Tasa de Largo Plazo de Estados Unidos & Porciento & FRED & DGS10\\
+    \hdashline
+    TBILL-1YR & Tasa de Corto Plazo de Estados Unidos & Porciento & FRED & DGS1\\
+    \hline
+  \end{tabular}
+\end{table}
+
+Se tienen observaciones mensuales del West Texas Intermediate (WTI), del JPM Dollar Index, del Chicago Board Options Exchange SPX Volatility Index, de la producción y demanda de petróleo por parte de la OPEP, así como las tasas de corto y largo plazo en Estados Unidos. La tabla \ref{tabla:Datos} resume las fuentes de información de los datos a utilizar en este trabajo. La muestra contiene 225 observaciones que corresponden al periodo de enero del 2000 a septiembre del 2018. Para estimar los modelos se utiliza el periodo comprendido entre enero del 2000 y junio del 2018; mientras que el horizonte de pronóstico va de julio del 2018 a septiembre del 2018. La siguiente sección muestra una análisis exploratorio de los datos. 
+
+```{r LimpiezaDatos,warning=FALSE, message=FALSE}
+source('01_Clean_Data_Petroleo.R')
+```
+
+## Análisis exploratorio de los datos
+
+```{r SetsDatos}
+# Seleccioanmos el set de datos a usar
+datos<-datos_1
+
+# Extraemos las fechas 
+Fecha<-datos$Fecha
+
+# Eliminamos la fecha de los datos 
+datos <- select(datos, -Fecha)
+
+# Función para graficar con estos datos. 
+plot_ts_datos<-plot_ts(datos,Fecha)
+```
+
+```{r PlotWTI,fig.pos='H',fig.width=12,fig.height=6,fig.cap='Serie de Tiempo del precio del West Texas Intermediate'}
+
+# WTI
+plot_ts_datos('WTI','firebrick1','West Texas Intermediate','Dólares por barril')
+
+
+```
+
+```{r PlotsRegresores,fig.pos='H',fig.width=12,fig.height=12,fig.cap='Serie de Tiempo de los Regresores'}
+
+par(mfrow=c(3,2))
+
+# JPM_Dollar_Index
+plot_ts_datos('JPM_Dollar_Index','royalblue1','JPM Dollar Index','Unidades')
+
+# VIX_Index
+plot_ts_datos('VIX_Index','darkgoldenrod1','VIX','Unidades')
+
+# OPEP_TOTPROD
+plot_ts_datos('OPEP_TOTPROD','olivedrab','Producción de la OPEP','Millones de barriles')
+
+# OPEP_TOTDEM
+plot_ts_datos('OPEP_TOTDEM','lightblue1','Demanda de la OPEP','Millones de barriles')
+
+# JPM_Dollar_Index
+plot_ts_datos('TBILL_10YR','coral','Tasa Largo Plazo EU','Porciento')
+
+# JPM_Dollar_Index
+plot_ts_datos('TBILL_1YR','mediumpurple1','Tasa Corto Plazo EU','Porciento')
+
+```
+
+```{r TablaCor, results='asis'}
+# Matriz de correlaciones
+mat_cor<-cor(datos)
+colnames(mat_cor)<-c('WTI','JPM Dollar Ind.','VIX','Prod. OPEP','Dem. OPEP','TBILL-10YR','TBILL-1YR')
+rownames(mat_cor)<-c('WTI','JPM Dollar Ind.','VIX','Prod. OPEP','Dem. OPEP','TBILL-10YR','TBILL-1YR')
+
+mat_cor_tabla<-xtable(mat_cor,caption='Matriz de correlaciones de las variables de estudio',
+                      label='tabla:mat_cor')
+
+align(mat_cor_tabla)<-'lrrrrrrr'
+print(mat_cor_tabla,comment=FALSE,print.placement='H',caption.placement = 'top',digits=2,size='small')
+```
+
+```{r TablaStatDesc, results='asis'}
+
+# Matriz de correlaciones
+estdesc<-rbind(stat.desc(datos),apply(datos,2,getmode))[c(8:9,15,12:14,4:6),]
+
+# Nombre de filas y columnas
+colnames(estdesc)<-c('WTI','JPM Dollar Ind.','VIX','Prod. OPEP','Dem. OPEP','TBILL-10YR','TBILL-1YR')
+rownames(estdesc)<-c('Mediana','Media','Moda','Varianza','Desv.Est.','Coef. Var.','Min','Max','Rango')
+
+# Impresion de la tabla
+estdesc_tabla<-xtable(estdesc,caption='Estadísticas Descriptivas de las Variables de Estudio',
+                      label='tabla:estdesc')
+
+align(estdesc_tabla)<-'lrrrrrrr'
+print(estdesc_tabla,comment=FALSE,print.placement='H',caption.placement = 'top',digits=2,size='small')
+
+```
+
+```{r Params}
+# No. obs predicción
+n <- nrow(datos)
+
+# No. obs pronosticos
+m <- 3
+# No. regresores
+k<- 6
+
+```
+
+\newpage
+
+# Modelos
+
+## Datos Originales
+```{r}
+# Seleccioanmos el set de datos a usar
+datos<-datos_1
+# Extraemos las fechas 
+Fecha<-datos$Fecha
+# Eliminamos la fecha de los datos 
+datos <- select(datos, -Fecha)
+```
+
+### MRLMN
+
+Una regresión lineal multiple tiene como resultado que JPM_Dollar_Index, OPEP_TOTPROD, OPEP_TOTDEM y TBILL_1YR son muy significativos con un nivel $\alpha$ de $0.001$. La única variable que no fue significativa en este modelo fue el VIX_Index y el TBILL_10YR.
+
+```{r}
+modelo_reg <- lm(data = datos, formula = WTI ~ .)
+summary(modelo_reg)
+```
+
+### GLM Estático
+
+```{r GLM_Estatico,message=FALSE, warning=FALSE, eval=TRUE, include=FALSE}
+
+source('Modelo_Estatico.R')
+
+```
+
+```{r Resumen_GLM_Estatico,results='asis'}
+
+#Tabla resumen
+out_estat.sum.t_tabla<-xtable(out_estat.sum.t,
+                              caption='Coeficientes Estimados para el Modelo Estático',
+                              label='tabla:coef_mod_estat')
+
+align(out_estat.sum.t_tabla)<-'l|rrrrrr'
+
+print(out_estat.sum.t_tabla,comment=FALSE,caption.placement = 'top')
+
+```
+
+```{r DIC_GLM_Estatico}
+
+#Imprimir DIC
+print(paste('DIC=',out_estat.dic,sep=''))
+
+```
+
+```{r PlotRegresores_Estatico,fig.width=12,fig.height=8,fig.cap='Regresores vs WTI: Modelo Estático'}
+
+#Predictions
+par(mfrow=c(3,2))
+
+
+# JPM_Dollar_Index vs. WTI
+plot_RegvsWTI(x.name='JPM_Dollar_Index',out.yp=out_estat.yp,pos_leg='topleft')
+
+# VIX_Index vs. WTI
+plot_RegvsWTI(x.name='VIX_Index',out.yp=out_estat.yp,pos_leg='topleft')
+
+# OPEP_TOTPROD vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTPROD',out.yp=out_estat.yp,pos_leg='topleft')
+
+# OPEP_TOTDEM vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTDEM',out.yp=out_estat.yp,pos_leg='topleft')
+
+# TBILL_10YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_10YR',out.yp=out_estat.yp,pos_leg='topright')
+
+# TBILL_1YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_1YR',out.yp=out_estat.yp,pos_leg='topright')
+
+```
+
+```{r tsWTI_Estatico,fig.width=12,fig.height=6,fig.cap='Ajuste y Predicción: Modelo Estático'}
+
+#t vs y
+par(mfrow=c(1,1))
+plot_tsWTI(out.yp=out_estat.yp,pos_leg='topleft')
+
+```
+
+### GLM Dinámico
+
+```{r GLM_Dinamico,message=FALSE, warning=FALSE, eval=TRUE, include=FALSE}
+
+source('Modelo_Dinamico.R')
+
+```
+** Rhat: de out_dinam.sum es MAYOR A 1.1 **
+
+```{r Resumen_GLM_dinam,eval=FALSE, include=FALSE}
+#Tabla resumen
+out_dinam.sum.t_alpha_tabla<-xtable(out_dinam.sum.t_alpha,
+                              caption='Interceptos Estimados para el Modelo Dinámico',
+                              label='tabla:coef_mod_dinam')
+
+align(out_dinam.sum.t_alpha_tabla)<-'l|rrrrrr'
+
+print(out_dinam.sum.t_alpha_tabla,comment=FALSE,caption.placement = 'top')
+
+
+out_dinam.sum.t_beta_tabla<-xtable(out_dinam.sum.t_beta,
+                              caption='Coeficientes Estimados para el Modelo Dinámico',
+                              label='tabla:coef_mod_dinam')
+
+align(out_dinam.sum.t_beta_tabla)<-'l|rrrrrr'
+
+print(out_dinam.sum.t_beta_tabla,comment=FALSE,caption.placement = 'top')
+
+
+```
+
+```{r DIC_GLM_dinam}
+#DIC
+print(out_dinam.dic)
+```
+
+```{r PlotRegresores_Dinam,fig.width=12,fig.height=6,fig.cap='Regresores vs WTI: Modelo Dinámico'}
+
+#Predictions
+par(mfrow=c(3,2))
+
+
+# JPM_Dollar_Index vs. WTI
+plot_RegvsWTI(x.name='JPM_Dollar_Index',out.yp=out_dinam.yp,pos_leg='topleft')
+
+# VIX_Index vs. WTI
+plot_RegvsWTI(x.name='VIX_Index',out.yp=out_dinam.yp,pos_leg='topleft')
+
+# OPEP_TOTPROD vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTPROD',out.yp=out_dinam.yp,pos_leg='topleft')
+
+# OPEP_TOTDEM vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTDEM',out.yp=out_dinam.yp,pos_leg='topleft')
+
+# TBILL_10YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_10YR',out.yp=out_dinam.yp,pos_leg='topright')
+
+# TBILL_1YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_1YR',out.yp=out_dinam.yp,pos_leg='topright')
+
+```
+
+```{r tsWTI_Dinam,fig.width=12,fig.height=6,fig.cap='Ajuste y Predicción: Modelo Dinámico'}
+#t vs y
+par(mfrow=c(1,1))
+plot_tsWTI(out.yp=out_dinam.yp,pos_leg='topleft')
+
+```
+
+```{r tsBetas_Dinam,message=FALSE, warning=FALSE, fig.width=12,fig.height=8,fig.cap='Coeficientes Estimados: Modelo Dinámico'}
+#betas
+par(mfrow=c(3,2))
+
+plot_beta_dinam<-plot_beta(out.beta=out_dinam.beta)
+
+lapply(1:6,plot_beta_dinam)
+```
+
+### GLM Dinámico con Intercepto Estático y Suavizamiento ($\lambda=10$)
+
+```{r GLM_Dinamico_suav_10,message=FALSE, warning=FALSE, eval=TRUE, include=FALSE}
+
+source('Mod_suav_10.R')
+
+```
+
+```{r Resumen_GLM_dinam_suav_10,eval=FALSE, include=FALSE}
+#Tabla resumen
+
+out_dinam_suav_10.sum.t_beta_tabla<-xtable(out_dinam_suav_10.sum.t_beta,
+                              caption='Coeficientes Estimados para el Modelo Dinámico',
+                              label='tabla:coef_mod_dinam')
+
+align(out_dinam_suav_10.sum.t_beta_tabla)<-'l|rrrrrr'
+
+print(out_dinam_suav_10.sum.t_beta_tabla,comment=FALSE,caption.placement = 'top')
+
+
+```
+
+```{r DIC_GLM_dinam_suav_10}
+#DIC
+print(out_dinam_suav_10.dic)
+```
+
+```{r PlotRegresores_Dinam2_suav,fig.width=12,fig.height=6,fig.cap='Regresores vs WTI: Modelo Dinámico con Intercepto Estático y Suavizamiento 10'}
+
+#Predictions
+par(mfrow=c(3,2))
+
+
+# JPM_Dollar_Index vs. WTI
+plot_RegvsWTI(x.name='JPM_Dollar_Index',out.yp=out_dinam_suav_10.yp,pos_leg='topleft')
+
+# VIX_Index vs. WTI
+plot_RegvsWTI(x.name='VIX_Index',out.yp=out_dinam_suav_10.yp,pos_leg='topright')
+
+# OPEP_TOTPROD vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTPROD',out.yp=out_dinam_suav_10.yp,pos_leg='topleft')
+
+# OPEP_TOTDEM vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTDEM',out.yp=out_dinam_suav_10.yp,pos_leg='topleft')
+
+# TBILL_10YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_10YR',out.yp=out_dinam_suav_10.yp,pos_leg='topright')
+
+# TBILL_1YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_1YR',out.yp=out_dinam_suav_10.yp,pos_leg='topright')
+
+```
+
+```{r tsWTI_Dinam_suav_10,fig.width=12,fig.height=6,fig.cap='Ajuste y Predicción: Modelo Dinámico con Intercepto Estático y Suavizamiento 10'}
+
+#t vs y
+par(mfrow=c(1,1))
+plot_tsWTI(out.yp=out_dinam_suav_10.yp,pos_leg='topleft')
+
+```
+
+```{r tsBetas_Dinam,message=FALSE, warning=FALSE, fig.width=12,fig.height=8,fig.cap='Coeficientes Estimados: Modelo Dinámico'}
+#betas
+par(mfrow=c(3,2))
+
+plot_beta_dinam_suav_10<-plot_beta(out.beta=out_dinam_suav_10.beta)
+
+lapply(1:6,plot_beta_dinam_suav_10)
+```
+
+### GLM Dinámico con Intercepto Estático y Suavizamiento ($\lambda=100$)
+
+```{r GLM_Dinamico_suav_100,message=FALSE, warning=FALSE, eval=TRUE, include=FALSE}
+
+source('Mod_suav_100.R')
+
+```
+
+```{r Resumen_GLM_dinam_suav_100,eval=FALSE, include=FALSE}
+#Tabla resumen
+
+out_dinam_suav_100.sum.t_beta_tabla<-xtable(out_dinam_suav_100.sum.t_beta,
+                              caption='Coeficientes Estimados para el Modelo Dinámico',
+                              label='tabla:coef_mod_dinam')
+
+align(out_dinam_suav_100.sum.t_beta_tabla)<-'l|rrrrrr'
+
+print(out_dinam_suav_100.sum.t_beta_tabla,comment=FALSE,caption.placement = 'top')
+
+
+```
+
+```{r DIC_GLM_dinam_suav_100}
+#DIC
+print(out_dinam_suav_100.dic)
+```
+
+```{r PlotRegresores_Dinam2_suav,fig.width=12,fig.height=6,fig.cap='Regresores vs WTI: Modelo Dinámico con Intercepto Estático y Suavizamiento 100'}
+
+#Predictions
+par(mfrow=c(3,2))
+
+
+# JPM_Dollar_Index vs. WTI
+plot_RegvsWTI(x.name='JPM_Dollar_Index',out.yp=out_dinam_suav_100.yp,pos_leg='topleft')
+
+# VIX_Index vs. WTI
+plot_RegvsWTI(x.name='VIX_Index',out.yp=out_dinam_suav_100.yp,pos_leg='topright')
+
+# OPEP_TOTPROD vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTPROD',out.yp=out_dinam_suav_100.yp,pos_leg='topleft')
+
+# OPEP_TOTDEM vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTDEM',out.yp=out_dinam_suav_100.yp,pos_leg='topleft')
+
+# TBILL_10YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_10YR',out.yp=out_dinam_suav_100.yp,pos_leg='topright')
+
+# TBILL_1YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_1YR',out.yp=out_dinam_suav_100.yp,pos_leg='topright')
+
+```
+
+```{r tsWTI_Dinam_suav_10,fig.width=12,fig.height=6,fig.cap='Ajuste y Predicción: Modelo Dinámico con Intercepto Estático y Suavizamiento 100'}
+
+#t vs y
+par(mfrow=c(1,1))
+plot_tsWTI(out.yp=out_dinam_suav_100.yp,pos_leg='topleft')
+
+```
+
+```{r tsBetas_Dinam,message=FALSE, warning=FALSE, fig.width=12,fig.height=8,fig.cap='Coeficientes Estimados: Modelo Dinámico'}
+#betas
+par(mfrow=c(3,2))
+
+plot_beta_dinam_suav_100<-plot_beta(out.beta=out_dinam_suav_100.beta)
+
+lapply(1:6,plot_beta_dinam_suav_100)
+```
+
+### GLM Dinámico con Intercepto Estático y Suavizamiento ($\lambda=100000$)
+
+```{r GLM_Dinamico_suav_100000,message=FALSE, warning=FALSE, eval=TRUE, include=FALSE}
+
+source('Mod_suav_100000.R')
+
+```
+
+```{r Resumen_GLM_dinam_suav_100000,eval=FALSE, include=FALSE}
+#Tabla resumen
+
+out_dinam_suav_100000.sum.t_beta_tabla<-xtable(out_dinam_suav_100000.sum.t_beta,
+                              caption='Coeficientes Estimados para el Modelo Dinámico',
+                              label='tabla:coef_mod_dinam')
+
+align(out_dinam_suav_100000.sum.t_beta_tabla)<-'l|rrrrrr'
+
+print(out_dinam_suav_100000.sum.t_beta_tabla,comment=FALSE,caption.placement = 'top')
+
+
+```
+
+```{r DIC_GLM_dinam_suav_100000}
+#DIC
+print(out_dinam_suav_100000.dic)
+```
+
+```{r PlotRegresores_Dinam2_suav_100000,fig.width=12,fig.height=6,fig.cap='Regresores vs WTI: Modelo Dinámico con Intercepto Estático y Suavizamiento 100000'}
+
+#Predictions
+par(mfrow=c(3,2))
+
+
+# JPM_Dollar_Index vs. WTI
+plot_RegvsWTI(x.name='JPM_Dollar_Index',out.yp=out_dinam_suav_100000.yp,pos_leg='topleft')
+
+# VIX_Index vs. WTI
+plot_RegvsWTI(x.name='VIX_Index',out.yp=out_dinam_suav_100000.yp,pos_leg='topright')
+
+# OPEP_TOTPROD vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTPROD',out.yp=out_dinam_suav_100000.yp,pos_leg='topleft')
+
+# OPEP_TOTDEM vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTDEM',out.yp=out_dinam_suav_100000.yp,pos_leg='topleft')
+
+# TBILL_10YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_10YR',out.yp=out_dinam_suav_100000.yp,pos_leg='topright')
+
+# TBILL_1YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_1YR',out.yp=out_dinam_suav_100000.yp,pos_leg='topright')
+
+```
+
+```{r tsWTI_Dinam_suav_100000,fig.width=12,fig.height=6,fig.cap='Ajuste y Predicción: Modelo Dinámico con Intercepto Estático y Suavizamiento 100000'}
+
+#t vs y
+par(mfrow=c(1,1))
+plot_tsWTI(out.yp=out_dinam_suav_100000.yp,pos_leg='topleft')
+```
+
+```{r tsBetas_Dinam,message=FALSE, warning=FALSE, fig.width=12,fig.height=8,fig.cap='Coeficientes Estimados: Modelo Dinámico'}
+#betas
+par(mfrow=c(3,2))
+
+plot_beta_dinam_suav_100000<-plot_beta(out.beta=out_dinam_suav_100000.beta)
+
+lapply(1:6,plot_beta_dinam_suav_100000)
+```
+
+## Datos Estandarizados 
+
+```{r}
+# Seleccioanmos el set de datos a usar
+datos<-datos_1_estand
+# Extraemos las fechas 
+Fecha<-datos$Fecha
+# Eliminamos la fecha de los datos 
+datos <- select(datos, -Fecha)
+```
+
+### MRLMN
+
+Con los datos estandarizados, encontramos que las variables explicativas significativas se reducen. En este caso, JPM_Dollar_Index, OPEP_TOTDEM y TBILL_1YR son muy significativos con un nivel $\alpha$ de $0.001$.
+
+```{r}
+modelo_reg <- lm(data = datos, formula = WTI ~ .)
+summary(modelo_reg)
+```
+
+### GLM Estático
+
+```{r GLM_Estatico,message=FALSE, warning=FALSE, eval=TRUE, include=FALSE}
+
+source('Modelo_Estatico.R')
+
+```
+
+```{r Resumen_GLM_Estatico,results='asis'}
+
+#Tabla resumen
+out_estat.sum.t_tabla<-xtable(out_estat.sum.t,
+                              caption='Coeficientes Estimados para el Modelo Estático',
+                              label='tabla:coef_mod_estat')
+
+align(out_estat.sum.t_tabla)<-'l|rrrrrr'
+
+print(out_estat.sum.t_tabla,comment=FALSE,caption.placement = 'top')
+
+```
+Este modelo arrojo un DIC de 262.19 que utilizaremos como referencia para los demas modelos. Es preciso mencionar que debido al reecalamientos de los datos, los resultados de este modelo no son comparables con los modelos anteriores.
+```{r DIC_GLM_Estatico}
+
+#Imprimir DIC
+print(paste('DIC=',out_estat.dic,sep=''))
+
+```
+
+```{r PlotRegresores_Estatico,fig.width=12,fig.height=8,fig.cap='Regresores vs WTI: Modelo Estático'}
+
+#Predictions
+par(mfrow=c(3,2))
+
+
+# JPM_Dollar_Index vs. WTI
+plot_RegvsWTI(x.name='JPM_Dollar_Index',out.yp=out_estat.yp,pos_leg='topleft')
+
+# VIX_Index vs. WTI
+plot_RegvsWTI(x.name='VIX_Index',out.yp=out_estat.yp,pos_leg='topleft')
+
+# OPEP_TOTPROD vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTPROD',out.yp=out_estat.yp,pos_leg='topleft')
+
+# OPEP_TOTDEM vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTDEM',out.yp=out_estat.yp,pos_leg='topleft')
+
+# TBILL_10YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_10YR',out.yp=out_estat.yp,pos_leg='topright')
+
+# TBILL_1YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_1YR',out.yp=out_estat.yp,pos_leg='topright')
+
+```
+
+```{r tsWTI_Estatico,fig.width=12,fig.height=6,fig.cap='Ajuste y Predicción: Modelo Estático'}
+
+#t vs y
+par(mfrow=c(1,1))
+plot_tsWTI(out.yp=out_estat.yp,pos_leg='topleft')
+
+```
+
+### GLM Dinámico
+
+```{r GLM_Dinamico,message=FALSE, warning=FALSE, eval=TRUE, include=FALSE}
+
+source('Modelo_Dinamico.R')
+
+```
+
+
+```{r Resumen_GLM_dinam,eval=FALSE, include=FALSE}
+#Tabla resumen
+out_dinam.sum.t_alpha_tabla<-xtable(out_dinam.sum.t_alpha,
+                              caption='Interceptos Estimados para el Modelo Dinámico',
+                              label='tabla:coef_mod_dinam')
+
+align(out_dinam.sum.t_alpha_tabla)<-'l|rrrrrr'
+
+print(out_dinam.sum.t_alpha_tabla,comment=FALSE,caption.placement = 'top')
+
+
+out_dinam.sum.t_beta_tabla<-xtable(out_dinam.sum.t_beta,
+                              caption='Coeficientes Estimados para el Modelo Dinámico',
+                              label='tabla:coef_mod_dinam')
+
+align(out_dinam.sum.t_beta_tabla)<-'l|rrrrrr'
+
+print(out_dinam.sum.t_beta_tabla,comment=FALSE,caption.placement = 'top')
+
+
+```
+
+```{r DIC_GLM_dinam}
+#DIC
+print(out_dinam.dic)
+```
+
+```{r PlotRegresores_Dinam,fig.width=12,fig.height=6,fig.cap='Regresores vs WTI: Modelo Dinámico'}
+
+#Predictions
+par(mfrow=c(3,2))
+
+
+# JPM_Dollar_Index vs. WTI
+plot_RegvsWTI(x.name='JPM_Dollar_Index',out.yp=out_dinam.yp,pos_leg='topleft')
+
+# VIX_Index vs. WTI
+plot_RegvsWTI(x.name='VIX_Index',out.yp=out_dinam.yp,pos_leg='topleft')
+
+# OPEP_TOTPROD vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTPROD',out.yp=out_dinam.yp,pos_leg='topleft')
+
+# OPEP_TOTDEM vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTDEM',out.yp=out_dinam.yp,pos_leg='topleft')
+
+# TBILL_10YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_10YR',out.yp=out_dinam.yp,pos_leg='topright')
+
+# TBILL_1YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_1YR',out.yp=out_dinam.yp,pos_leg='topright')
+
+```
+
+```{r tsWTI_Dinam,fig.width=12,fig.height=6,fig.cap='Ajuste y Predicción: Modelo Dinámico'}
+#t vs y
+par(mfrow=c(1,1))
+plot_tsWTI(out.yp=out_dinam.yp,pos_leg='topleft')
+
+```
+
+```{r tsBetas_Dinam,message=FALSE, warning=FALSE, fig.width=12,fig.height=8,fig.cap='Coeficientes Estimados: Modelo Dinámico'}
+#betas
+par(mfrow=c(3,2))
+
+plot_beta_dinam<-plot_beta(out.beta=out_dinam.beta)
+
+lapply(1:6,plot_beta_dinam)
+```
+
+### GLM Dinámico con Intercepto Estático y Suavizamiento ($\lambda=10$)
+
+```{r GLM_Dinamico_suav_10,message=FALSE, warning=FALSE, eval=TRUE, include=FALSE}
+
+source('Mod_suav_10.R')
+
+```
+
+```{r Resumen_GLM_dinam_suav_10,eval=FALSE, include=FALSE}
+#Tabla resumen
+
+out_dinam_suav_10.sum.t_beta_tabla<-xtable(out_dinam_suav_10.sum.t_beta,
+                              caption='Coeficientes Estimados para el Modelo Dinámico',
+                              label='tabla:coef_mod_dinam')
+
+align(out_dinam_suav_10.sum.t_beta_tabla)<-'l|rrrrrr'
+
+print(out_dinam_suav_10.sum.t_beta_tabla,comment=FALSE,caption.placement = 'top')
+
+
+```
+
+```{r DIC_GLM_dinam_suav_10}
+#DIC
+print(out_dinam_suav_10.dic)
+```
+
+```{r PlotRegresores_Dinam2_suav,fig.width=12,fig.height=6,fig.cap='Regresores vs WTI: Modelo Dinámico con Intercepto Estático y Suavizamiento 10'}
+
+#Predictions
+par(mfrow=c(3,2))
+
+
+# JPM_Dollar_Index vs. WTI
+plot_RegvsWTI(x.name='JPM_Dollar_Index',out.yp=out_dinam_suav_10.yp,pos_leg='topleft')
+
+# VIX_Index vs. WTI
+plot_RegvsWTI(x.name='VIX_Index',out.yp=out_dinam_suav_10.yp,pos_leg='topright')
+
+# OPEP_TOTPROD vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTPROD',out.yp=out_dinam_suav_10.yp,pos_leg='topleft')
+
+# OPEP_TOTDEM vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTDEM',out.yp=out_dinam_suav_10.yp,pos_leg='topleft')
+
+# TBILL_10YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_10YR',out.yp=out_dinam_suav_10.yp,pos_leg='topright')
+
+# TBILL_1YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_1YR',out.yp=out_dinam_suav_10.yp,pos_leg='topright')
+
+```
+
+```{r tsWTI_Dinam_suav_10,fig.width=12,fig.height=6,fig.cap='Ajuste y Predicción: Modelo Dinámico con Intercepto Estático y Suavizamiento 10'}
+
+#t vs y
+par(mfrow=c(1,1))
+plot_tsWTI(out.yp=out_dinam_suav_10.yp,pos_leg='topleft')
+
+```
+
+```{r tsBetas_Dinam,message=FALSE, warning=FALSE, fig.width=12,fig.height=8,fig.cap='Coeficientes Estimados: Modelo Dinámico'}
+#betas
+par(mfrow=c(3,2))
+
+plot_beta_dinam_suav_10<-plot_beta(out.beta=out_dinam_suav_10.beta)
+
+lapply(1:6,plot_beta_dinam_suav_10)
+```
+
+### GLM Dinámico con Intercepto Estático y Suavizamiento ($\lambda=100$)
+
+```{r GLM_Dinamico_suav_100,message=FALSE, warning=FALSE, eval=TRUE, include=FALSE}
+
+source('Mod_suav_100.R')
+
+```
+
+```{r Resumen_GLM_dinam_suav_100,eval=FALSE, include=FALSE}
+#Tabla resumen
+
+out_dinam_suav_100.sum.t_beta_tabla<-xtable(out_dinam_suav_100.sum.t_beta,
+                              caption='Coeficientes Estimados para el Modelo Dinámico',
+                              label='tabla:coef_mod_dinam')
+
+align(out_dinam_suav_100.sum.t_beta_tabla)<-'l|rrrrrr'
+
+print(out_dinam_suav_100.sum.t_beta_tabla,comment=FALSE,caption.placement = 'top')
+
+
+```
+
+```{r DIC_GLM_dinam_suav_100}
+#DIC
+print(out_dinam_suav_100.dic)
+```
+
+```{r PlotRegresores_Dinam2_suav,fig.width=12,fig.height=6,fig.cap='Regresores vs WTI: Modelo Dinámico con Intercepto Estático y Suavizamiento 100'}
+
+#Predictions
+par(mfrow=c(3,2))
+
+
+# JPM_Dollar_Index vs. WTI
+plot_RegvsWTI(x.name='JPM_Dollar_Index',out.yp=out_dinam_suav_100.yp,pos_leg='topleft')
+
+# VIX_Index vs. WTI
+plot_RegvsWTI(x.name='VIX_Index',out.yp=out_dinam_suav_100.yp,pos_leg='topright')
+
+# OPEP_TOTPROD vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTPROD',out.yp=out_dinam_suav_100.yp,pos_leg='topleft')
+
+# OPEP_TOTDEM vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTDEM',out.yp=out_dinam_suav_100.yp,pos_leg='topleft')
+
+# TBILL_10YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_10YR',out.yp=out_dinam_suav_100.yp,pos_leg='topright')
+
+# TBILL_1YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_1YR',out.yp=out_dinam_suav_100.yp,pos_leg='topright')
+
+```
+
+```{r tsWTI_Dinam_suav_10,fig.width=12,fig.height=6,fig.cap='Ajuste y Predicción: Modelo Dinámico con Intercepto Estático y Suavizamiento 100'}
+
+#t vs y
+par(mfrow=c(1,1))
+plot_tsWTI(out.yp=out_dinam_suav_100.yp,pos_leg='topleft')
+
+```
+
+```{r tsBetas_Dinam,message=FALSE, warning=FALSE, fig.width=12,fig.height=8,fig.cap='Coeficientes Estimados: Modelo Dinámico'}
+#betas
+par(mfrow=c(3,2))
+
+plot_beta_dinam_suav_100<-plot_beta(out.beta=out_dinam_suav_100.beta)
+
+lapply(1:6,plot_beta_dinam_suav_100)
+```
+
+
+## Datos Transformados 
+```{r}
+# Seleccioanmos el set de datos a usar
+datos<-datos_3
+# Extraemos las fechas 
+Fecha<-datos$Fecha
+# Eliminamos la fecha de los datos 
+datos <- select(datos, -Fecha)
+```
+
+### MRLMN sin Intercepto
+
+```{r}
+modelo_reg <- lm(data = datos, formula = WTI ~ .-1)
+summary(modelo_reg)
+```
+
+
+### GLM Estático sin Intercepto
+```{r GLM_Estatico_Sin_Intercepto,message=FALSE, warning=FALSE, eval=TRUE, include=FALSE}
+
+source('Modelo_Estatico_Sin_Intercepto.R')
+
+```
+
+```{r Resumen_GLM_Estatico_Sin_Intercepto,results='asis'}
+
+#Tabla resumen
+out_estat.sum.t_tabla<-xtable(out_estat.sum.t,
+                              caption='Coeficientes Estimados para el Modelo Estático sin Intercepto',
+                              label='tabla:coef_mod_estat')
+
+align(out_estat.sum.t_tabla)<-'l|rrrrrr'
+
+print(out_estat.sum.t_tabla,comment=FALSE,caption.placement = 'top')
+
+```
+
+```{r DIC_GLM_Estatico}
+
+#Imprimir DIC
+print(paste('DIC=',out_estat.dic,sep=''))
+
+```
+
+```{r PlotRegresores_Estatico,fig.width=12,fig.height=8,fig.cap='Regresores vs WTI: Modelo Estático'}
+
+#Predictions
+par(mfrow=c(3,2))
+
+
+# JPM_Dollar_Index vs. WTI
+plot_RegvsWTI(x.name='JPM_Dollar_Index',out.yp=out_estat.yp,pos_leg='topleft')
+
+# VIX_Index vs. WTI
+plot_RegvsWTI(x.name='VIX_Index',out.yp=out_estat.yp,pos_leg='topleft')
+
+# OPEP_TOTPROD vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTPROD',out.yp=out_estat.yp,pos_leg='topleft')
+
+# OPEP_TOTDEM vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTDEM',out.yp=out_estat.yp,pos_leg='topleft')
+
+# TBILL_10YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_10YR',out.yp=out_estat.yp,pos_leg='topright')
+
+# TBILL_1YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_1YR',out.yp=out_estat.yp,pos_leg='topright')
+
+```
+
+```{r tsWTI_Estatico,fig.width=12,fig.height=6,fig.cap='Ajuste y Predicción: Modelo Estático'}
+
+#t vs y
+par(mfrow=c(1,1))
+plot_tsWTI(out.yp=out_estat.yp,pos_leg='topleft')
+
+```
+
+
+
+### GLM Dinámico sin Intercepto
+```{r GLM_Dinamico_Sin_Intercepto,message=FALSE, warning=FALSE, eval=TRUE, include=FALSE}
+
+source('Modelo_Dinamico_Sin_Intercepto.R')
+
+```
+
+
+```{r Resumen_GLM_dinam_sin_intercepto,eval=FALSE, include=FALSE}
+#Tabla resumen
+out_dinam.sum.t_beta_tabla<-xtable(out_dinam.sum.t_beta,
+                              caption='Coeficientes Estimados para el Modelo Dinámico',
+                              label='tabla:coef_mod_dinam')
+
+align(out_dinam.sum.t_beta_tabla)<-'l|rrrrrr'
+
+print(out_dinam.sum.t_beta_tabla,comment=FALSE,caption.placement = 'top')
+
+
+```
+
+```{r DIC_GLM_dinam}
+#DIC
+print(out_dinam.dic)
+```
+
+```{r PlotRegresores_Dinam_Sin_Intercepto,fig.width=12,fig.height=6,fig.cap='Regresores vs WTI: Modelo Dinámico'}
+
+#Predictions
+par(mfrow=c(3,2))
+
+
+# JPM_Dollar_Index vs. WTI
+plot_RegvsWTI(x.name='JPM_Dollar_Index',out.yp=out_dinam.yp,pos_leg='topleft')
+
+# VIX_Index vs. WTI
+plot_RegvsWTI(x.name='VIX_Index',out.yp=out_dinam.yp,pos_leg='topleft')
+
+# OPEP_TOTPROD vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTPROD',out.yp=out_dinam.yp,pos_leg='topleft')
+
+# OPEP_TOTDEM vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTDEM',out.yp=out_dinam.yp,pos_leg='topleft')
+
+# TBILL_10YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_10YR',out.yp=out_dinam.yp,pos_leg='topright')
+
+# TBILL_1YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_1YR',out.yp=out_dinam.yp,pos_leg='topright')
+
+```
+
+```{r tsWTI_Dinam_Sin_Intercepto,fig.width=12,fig.height=6,fig.cap='Ajuste y Predicción: Modelo Dinámico'}
+#t vs y
+par(mfrow=c(1,1))
+plot_tsWTI(out.yp=out_dinam.yp,pos_leg='topleft')
+
+```
+
+```{r tsBetas_Dinam_Sin_Intercepto,message=FALSE, warning=FALSE, fig.width=12,fig.height=8,fig.cap='Coeficientes Estimados: Modelo Dinámico'}
+#betas
+par(mfrow=c(3,2))
+
+plot_beta_dinam<-plot_beta(out.beta=out_dinam.beta)
+
+lapply(1:6,plot_beta_dinam)
+```
+
+
+### GLM Dinámico sin Intercepto y Suavizamiento ($\lambda=10$)
+```{r GLM_Dinamico2_suav_10,message=FALSE, warning=FALSE, eval=TRUE, include=FALSE}
+
+source('Mod2_suav_10.R')
+
+```
+
+```{r Resumen_GLM_dinam2_suav_10,eval=FALSE, include=FALSE}
+#Tabla resumen
+
+out_dinam_suav_10.sum.t_beta_tabla<-xtable(out_dinam_suav_10.sum.t_beta,
+                              caption='Coeficientes Estimados para el Modelo Dinámico',
+                              label='tabla:coef_mod_dinam')
+
+align(out_dinam_suav_10.sum.t_beta_tabla)<-'l|rrrrrr'
+
+print(out_dinam_suav_10.sum.t_beta_tabla,comment=FALSE,caption.placement = 'top')
+
+
+```
+
+```{r DIC_GLM_dinam2_suav_10}
+#DIC
+print(out_dinam_suav_10.dic)
+```
+
+```{r PlotRegresores_Dinam2_suav,fig.width=12,fig.height=6,fig.cap='Regresores vs WTI: Modelo Dinámico con Intercepto Estático y Suavizamiento 10'}
+
+#Predictions
+par(mfrow=c(3,2))
+
+
+# JPM_Dollar_Index vs. WTI
+plot_RegvsWTI(x.name='JPM_Dollar_Index',out.yp=out_dinam_suav_10.yp,pos_leg='topleft')
+
+# VIX_Index vs. WTI
+plot_RegvsWTI(x.name='VIX_Index',out.yp=out_dinam_suav_10.yp,pos_leg='topright')
+
+# OPEP_TOTPROD vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTPROD',out.yp=out_dinam_suav_10.yp,pos_leg='topleft')
+
+# OPEP_TOTDEM vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTDEM',out.yp=out_dinam_suav_10.yp,pos_leg='topleft')
+
+# TBILL_10YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_10YR',out.yp=out_dinam_suav_10.yp,pos_leg='topright')
+
+# TBILL_1YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_1YR',out.yp=out_dinam_suav_10.yp,pos_leg='topright')
+
+```
+
+```{r tsWTI_Dinam2_suav_10,fig.width=12,fig.height=6,fig.cap='Ajuste y Predicción: Modelo Dinámico con Intercepto Estático y Suavizamiento 10'}
+
+#t vs y
+par(mfrow=c(1,1))
+plot_tsWTI(out.yp=out_dinam_suav_10.yp,pos_leg='topleft')
+
+```
+
+```{r tsBetas_Dinam2,message=FALSE, warning=FALSE, fig.width=12,fig.height=8,fig.cap='Coeficientes Estimados: Modelo Dinámico'}
+#betas
+par(mfrow=c(3,2))
+
+plot_beta_dinam_suav_10<-plot_beta(out.beta=out_dinam_suav_10.beta)
+
+lapply(1:6,plot_beta_dinam_suav_10)
+```
+
+
+### GLM Dinámico sin Intercepto y Suavizamiento ($\lambda=100$)
+```{r GLM_Dinamico2_suav_100,message=FALSE, warning=FALSE, eval=TRUE, include=FALSE}
+
+source('Mod2_suav_100.R')
+
+```
+
+```{r Resumen_GLM_dinam2_suav_100,eval=FALSE, include=FALSE}
+#Tabla resumen
+
+out_dinam_suav_100.sum.t_beta_tabla<-xtable(out_dinam_suav_100.sum.t_beta,
+                              caption='Coeficientes Estimados para el Modelo Dinámico',
+                              label='tabla:coef_mod_dinam')
+
+align(out_dinam_suav_100.sum.t_beta_tabla)<-'l|rrrrrr'
+
+print(out_dinam_suav_100.sum.t_beta_tabla,comment=FALSE,caption.placement = 'top')
+
+
+```
+
+```{r DIC_GLM_dinam2_suav_100}
+#DIC
+print(out_dinam_suav_100.dic)
+```
+
+```{r PlotRegresores_Dinam2_suav,fig.width=12,fig.height=6,fig.cap='Regresores vs WTI: Modelo Dinámico con Intercepto Estático y Suavizamiento 100'}
+
+#Predictions
+par(mfrow=c(3,2))
+
+
+# JPM_Dollar_Index vs. WTI
+plot_RegvsWTI(x.name='JPM_Dollar_Index',out.yp=out_dinam_suav_100.yp,pos_leg='topleft')
+
+# VIX_Index vs. WTI
+plot_RegvsWTI(x.name='VIX_Index',out.yp=out_dinam_suav_100.yp,pos_leg='topright')
+
+# OPEP_TOTPROD vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTPROD',out.yp=out_dinam_suav_100.yp,pos_leg='topleft')
+
+# OPEP_TOTDEM vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTDEM',out.yp=out_dinam_suav_100.yp,pos_leg='topleft')
+
+# TBILL_10YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_10YR',out.yp=out_dinam_suav_100.yp,pos_leg='topright')
+
+# TBILL_1YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_1YR',out.yp=out_dinam_suav_100.yp,pos_leg='topright')
+
+```
+
+```{r tsWTI_Dinam2_suav_10,fig.width=12,fig.height=6,fig.cap='Ajuste y Predicción: Modelo Dinámico con Intercepto Estático y Suavizamiento 100'}
+
+#t vs y
+par(mfrow=c(1,1))
+plot_tsWTI(out.yp=out_dinam_suav_100.yp,pos_leg='topleft')
+
+```
+
+```{r tsBetas_Dinam2,message=FALSE, warning=FALSE, fig.width=12,fig.height=8,fig.cap='Coeficientes Estimados: Modelo Dinámico'}
+#betas
+par(mfrow=c(3,2))
+
+plot_beta_dinam_suav_100<-plot_beta(out.beta=out_dinam_suav_100.beta)
+
+lapply(1:6,plot_beta_dinam_suav_100)
+```
+
+### GLM Dinámico sin Intercepto y Suavizamiento ($\lambda=1000$)
+```{r GLM_Dinamico2_suav_1000,message=FALSE, warning=FALSE, eval=TRUE, include=FALSE}
+
+source('Mod2_suav_1000.R')
+
+```
+
+```{r Resumen_GLM_dinam2_suav_1000,eval=FALSE, include=FALSE}
+#Tabla resumen
+
+out_dinam_suav_100.sum.t_beta_tabla<-xtable(out_dinam_suav_100.sum.t_beta,
+                              caption='Coeficientes Estimados para el Modelo Dinámico',
+                              label='tabla:coef_mod_dinam')
+
+align(out_dinam_suav_100.sum.t_beta_tabla)<-'l|rrrrrr'
+
+print(out_dinam_suav_100.sum.t_beta_tabla,comment=FALSE,caption.placement = 'top')
+
+
+```
+
+```{r DIC_GLM_dinam2_suav_1000}
+#DIC
+print(out_dinam_suav_100.dic)
+```
+
+```{r PlotRegresores_Dinam2_suav,fig.width=12,fig.height=6,fig.cap='Regresores vs WTI: Modelo Dinámico con Intercepto Estático y Suavizamiento 100'}
+
+#Predictions
+par(mfrow=c(3,2))
+
+
+# JPM_Dollar_Index vs. WTI
+plot_RegvsWTI(x.name='JPM_Dollar_Index',out.yp=out_dinam_suav_100.yp,pos_leg='topleft')
+
+# VIX_Index vs. WTI
+plot_RegvsWTI(x.name='VIX_Index',out.yp=out_dinam_suav_100.yp,pos_leg='topright')
+
+# OPEP_TOTPROD vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTPROD',out.yp=out_dinam_suav_100.yp,pos_leg='topleft')
+
+# OPEP_TOTDEM vs. WTI
+plot_RegvsWTI(x.name='OPEP_TOTDEM',out.yp=out_dinam_suav_100.yp,pos_leg='topleft')
+
+# TBILL_10YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_10YR',out.yp=out_dinam_suav_100.yp,pos_leg='topright')
+
+# TBILL_1YR vs. WTI
+plot_RegvsWTI(x.name='TBILL_1YR',out.yp=out_dinam_suav_100.yp,pos_leg='topright')
+
+```
+
+```{r tsWTI_Dinam2_suav_1000,fig.width=12,fig.height=6,fig.cap='Ajuste y Predicción: Modelo Dinámico con Intercepto Estático y Suavizamiento 100'}
+
+#t vs y
+par(mfrow=c(1,1))
+plot_tsWTI(out.yp=out_dinam_suav_100.yp,pos_leg='topleft')
+
+```
+
+```{r tsBetas_Dinam2,message=FALSE, warning=FALSE, fig.width=12,fig.height=8,fig.cap='Coeficientes Estimados: Modelo Dinámico'}
+#betas
+par(mfrow=c(3,2))
+
+plot_beta_dinam_suav_100<-plot_beta(out.beta=out_dinam_suav_100.beta)
+
+lapply(1:6,plot_beta_dinam_suav_100)
+```

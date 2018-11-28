@@ -11,15 +11,15 @@ semilla<-3567
 data_estat <- list("n"=n,"m"=m,"y"=c(datos$WTI[1:(n-3)],rep(NA,m)), "x"=select(datos, -WTI))
 
 #-Defining inits-
-inits<-function(){list(alpha=0,beta=rep(0,k),tau=1,yp=rep(1,n))}
+inits<-function(){list(beta=rep(0,k),tau=1,yp=rep(1,n))}
 
 #-Selecting parameters to monitor-
-parameters<-c("alpha","beta","tau","yp")
+parameters<-c("beta","tau","yp")
 
 
 #-Running code in JAGS-
 set.seed(semilla)
-mod_estat.sim<-jags(data_estat,inits,parameters,model.file="mod_estatico.txt",
+mod_estat.sim<-jags(data_estat,inits,parameters,model.file="mod_estatico_sin_intercepto.txt",
                     n.iter=niter,n.chains=nchains,n.burnin=nburning,n.thin=1,
                     progress.bar='none')
 
@@ -52,7 +52,7 @@ out_estat.sum.t<-cbind(rbind(out_estat.sum[grep("alpha",rownames(out_estat.sum))
 out_estat.sum.t<-cbind(out_estat.sum.t,apply(cbind(out_estat$alpha,out_estat$beta),2,prob))
 out_estat.sum.t<-out_estat.sum.t[,c(1,3,5,2,4,6)]
 colnames(out_estat.sum.t)<-c("Media","Mediana","Moda","2.5%","97.5%","Prob.")
-rownames(out_estat.sum.t)<-c('Intercepto','JPM Dollar Ind.','VIX Ind','Prod. OPEP','Dem. OPEP','T-Bill 10YR','T-Bill 1YR')
+rownames(out_estat.sum.t)<-c('JPM Dollar Ind.','VIX Ind','Prod. OPEP','Dem. OPEP','T-Bill 10YR','T-Bill 1YR')
 
 
 #-DIC-
